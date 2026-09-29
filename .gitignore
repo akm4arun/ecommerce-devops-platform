@@ -38,6 +38,15 @@ override.tf.json
 *_override.tf
 *_override.tf.json
 
+# Terraform plan files and backups
+*.tfplan
+*.tfplan.*
+*.bak
+
+# Kubernetes secrets
+kubernetes/secret.yaml
+kubernetes/secrets/
+
 # Python tooling
 .coverage
 htmlcov/
