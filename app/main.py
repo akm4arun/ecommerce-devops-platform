@@ -19,49 +19,21 @@ def create_app():
 
     @app.route("/")
     def home():
-        return """
+        deployment_color = os.getenv("DEPLOYMENT_COLOR", "UNKNOWN")
+
+        return f"""
         <!DOCTYPE html>
         <html>
         <head>
             <title>Ecommerce Platform</title>
-            <style>
-                body {
-                    font-family: Arial, sans-serif;
-                    margin: 40px;
-                }
-
-                .bug-banner {
-                    background: #b00020;
-                    color: white;
-                    padding: 25px;
-                    margin-bottom: 30px;
-                    border-radius: 8px;
-                    font-size: 24px;
-                    font-weight: bold;
-                }
-
-                .status {
-                    color: #b00020;
-                    font-weight: bold;
-                }
-            </style>
         </head>
         <body>
-            <div class="bug-banner">
-                ⚠️ DEMO BUG — Homepage Deployment Failure
-            </div>
-
             <h1>🛒 Ecommerce Platform</h1>
             <h2>Welcome to our Ecommerce Store</h2>
-
+            <p><strong>Deployment Color: {deployment_color}</strong></p>
             <p><strong>Version: v2</strong></p>
-            <p>Deployment: Rolling Upgrade Demo</p>
-            <p class="status">Status: Healthy</p>
-
-            <p>
-                This version represents an intentionally defective release
-                for the rollback demonstration.
-            </p>
+            <p>Deployment: Blue/Green Demo</p>
+            <p>Status: Healthy</p>
         </body>
         </html>
         """
