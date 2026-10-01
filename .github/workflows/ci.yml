@@ -124,3 +124,49 @@ jobs:
       - name: Stop test container
         if: always()
         run: docker rm --force ecommerce-api-test || true
+  ecr-push:
+    name: Build and Push Image to ECR
+    runs-on: ubuntu-latest
+
+    permissions: 
+      id-token: write
+      contents: read
+
+    needs: 
+      - python-tests
+      - security-scan
+      - terraform-validation
+      - docker-build
+
+    if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::099731416734:role/ecommerce-github-actions-ecr-push-role
+          aws-region: ap-south-2
+
+      - name: Login to Amazon ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build Docker image
+        env:
+          REGISTRY: ${{ steps.ecr-login.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker build \
+            --tag "$REGISTRY/ecommerce-devops-platform:$IMAGE_TAG" \
+            .
+
+      - name: Push Docker image to ECR
+        env:
+          REGISTRY: ${{ steps.ecr-login.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker push \
+            "$REGISTRY/ecommerce-devops-platform:$IMAGE_TAG"
