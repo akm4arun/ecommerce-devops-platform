@@ -1,0 +1,29 @@
+# Normalize text files to LF in the repository
+* text=auto eol=lf
+
+# Python
+*.py text eol=lf
+
+# Shell scripts
+*.sh text eol=lf
+
+# YAML / Kubernetes
+*.yaml text eol=lf
+*.yml text eol=lf
+
+# Terraform
+*.tf text eol=lf
+*.tfvars text eol=lf
+
+# Docker
+Dockerfile text eol=lf
+
+# GitHub Actions
+.github/workflows/* text eol=lf
+
+# Markdown / documentation
+*.md text eol=lf
+
+# Windows-specific files
+*.bat text eol=crlf
+*.cmd text eol=crlf
