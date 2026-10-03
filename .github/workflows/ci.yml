@@ -170,3 +170,48 @@ jobs:
         run: |
           docker push \
             "$REGISTRY/ecommerce-devops-platform:$IMAGE_TAG"
+
+
+  deploy-blue-green:
+    name: Deploy Blue and Green to K3s
+    runs-on: [self-hosted, k3s-deploy]
+
+    needs:
+      - ecr-push
+
+    if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Prepare deployment manifest
+        env:
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          sed \
+            "s|099731416734.dkr.ecr.ap-south-2.amazonaws.com/ecommerce-devops-platform:IMAGE_TAG|099731416734.dkr.ecr.ap-south-2.amazonaws.com/ecommerce-devops-platform:${IMAGE_TAG}|g" \
+            kubernetes/blue-green.yaml \
+            > /tmp/blue-green-deploy.yaml
+
+          echo "Deployment image:"
+          grep "image:" /tmp/blue-green-deploy.yaml
+
+      - name: Deploy Blue and Green
+        run: |
+          kubectl apply -f /tmp/blue-green-deploy.yaml
+
+      - name: Verify Blue and Green
+        run: |
+          kubectl rollout status deployment/ecommerce-api-blue \
+            -n ecommerce-dev \
+            --timeout=180s
+
+          kubectl rollout status deployment/ecommerce-api-green \
+            -n ecommerce-dev \
+            --timeout=180s
+
+          kubectl get deployment,pod \
+            -n ecommerce-dev \
+            -l 'deployment-color in (blue,green)' \
+            -o wide
