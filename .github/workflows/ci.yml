@@ -7,7 +7,7 @@ on:
   push: 
     branches: 
       - develop
-      - phase14-canary
+      - canary
   workflow_dispatch:
 
 permissions: 
@@ -20,6 +20,8 @@ jobs:
 
     outputs:
       application_changed: ${{ steps.changes.outputs.application_changed }}
+      canary_deployment_changed: ${{ steps.changes.outputs.canary_deployment_changed }}
+      canary_traffic_changed: ${{ steps.changes.outputs.canary_traffic_changed }}
 
     steps:
       - name: Checkout repository
@@ -32,6 +34,8 @@ jobs:
         shell: bash
         run: |
           APPLICATION_CHANGED=false
+          CANARY_DEPLOYMENT_CHANGED=false
+          CANARY_TRAFFIC_CHANGED=false
 
           if [[ "${{ github.event_name }}" == "push" ]]; then
             CHANGED_FILES="$(git diff --name-only \
@@ -61,11 +65,24 @@ jobs:
               Dockerfile|requirements.txt|app/*)
                 APPLICATION_CHANGED=true
                 ;;
+
+              kubernetes/canary.yaml|kubernetes/canary-service.yaml)
+                CANARY_DEPLOYMENT_CHANGED=true
+                ;;
+
+              kubernetes/canary-traffic.yaml|kubernetes/canary-ingressroute.yaml)
+                CANARY_TRAFFIC_CHANGED=true
+                ;;
             esac
           done <<< "$CHANGED_FILES"
 
           echo "Application changed: $APPLICATION_CHANGED"
+          echo "Canary deployment changed: $CANARY_DEPLOYMENT_CHANGED"
+          echo "Canary traffic changed: $CANARY_TRAFFIC_CHANGED"
+
           echo "application_changed=$APPLICATION_CHANGED" >> "$GITHUB_OUTPUT"
+          echo "canary_deployment_changed=$CANARY_DEPLOYMENT_CHANGED" >> "$GITHUB_OUTPUT"
+          echo "canary_traffic_changed=$CANARY_TRAFFIC_CHANGED" >> "$GITHUB_OUTPUT"
   python-tests:
     name: Python Tests
     runs-on: ubuntu-latest
@@ -194,7 +211,7 @@ jobs:
 
     if: >
       github.event_name == 'push' &&
-      (github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/phase14-canary') &&
+      (github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/canary') &&
       needs.detect-changes.outputs.application_changed == 'true'
 
     steps:
@@ -277,18 +294,62 @@ jobs:
     runs-on: [self-hosted, k3s-deploy]
 
     needs:
+      - detect-changes
       - ecr-push
 
-    if: github.event_name == 'push' && github.ref == 'refs/heads/phase14-canary'
+    if: >
+      always() &&
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/canary' &&
+      (
+        (
+          needs.detect-changes.outputs.application_changed == 'true' &&
+          needs.ecr-push.result == 'success'
+        ) ||
+        (
+          needs.detect-changes.outputs.application_changed != 'true' &&
+          (
+            needs.detect-changes.outputs.canary_deployment_changed == 'true' ||
+            needs.detect-changes.outputs.canary_traffic_changed == 'true'
+          ) &&
+          needs.ecr-push.result == 'skipped'
+        )
+      )
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Prepare Canary deployment manifest
-        env:
-          IMAGE_TAG: ${{ github.sha }}
+        if: >
+          needs.detect-changes.outputs.application_changed == 'true' ||
+          needs.detect-changes.outputs.canary_deployment_changed == 'true'
+        shell: bash
         run: |
+          if [[ "${{ needs.detect-changes.outputs.application_changed }}" == "true" ]]; then
+            IMAGE_TAG="${{ github.sha }}"
+            echo "Application change detected."
+            echo "Using newly built image: ${IMAGE_TAG}"
+          else
+            echo "Kubernetes-only Canary change detected."
+            echo "Reading the currently deployed Canary image..."
+
+            CURRENT_IMAGE="$(kubectl get deployment ecommerce-api-canary \
+              -n ecommerce-dev \
+              -o jsonpath='{.spec.template.spec.containers[0].image}')"
+
+            if [[ -z "$CURRENT_IMAGE" ]]; then
+              echo "ERROR: Could not determine the currently deployed Canary image."
+              exit 1
+            fi
+
+            echo "Currently deployed image:"
+            echo "$CURRENT_IMAGE"
+
+            IMAGE_TAG="${CURRENT_IMAGE##*:}"
+            echo "Reusing existing image tag: ${IMAGE_TAG}"
+          fi
+
           sed \
             "s|099731416734.dkr.ecr.ap-south-2.amazonaws.com/ecommerce-devops-platform:IMAGE_TAG|099731416734.dkr.ecr.ap-south-2.amazonaws.com/ecommerce-devops-platform:${IMAGE_TAG}|g" \
             kubernetes/canary.yaml \
@@ -298,17 +359,49 @@ jobs:
           grep "image:" /tmp/canary-deploy.yaml
 
       - name: Deploy Canary
+        shell: bash
         run: |
-          kubectl apply -f /tmp/canary-deploy.yaml
-          kubectl apply -f kubernetes/canary-service.yaml
+          if [[ "${{ needs.detect-changes.outputs.application_changed }}" == "true" ||
+                "${{ needs.detect-changes.outputs.canary_deployment_changed }}" == "true" ]]; then
+
+            if [[ -f /tmp/canary-deploy.yaml ]]; then
+              kubectl apply -f /tmp/canary-deploy.yaml
+            fi
+
+            if [[ "${{ needs.detect-changes.outputs.canary_deployment_changed }}" == "true" ]]; then
+              kubectl apply -f kubernetes/canary-service.yaml
+            fi
+          fi
+
+          if [[ "${{ needs.detect-changes.outputs.canary_traffic_changed }}" == "true" ]]; then
+            kubectl apply -f kubernetes/canary-traffic.yaml
+            kubectl apply -f kubernetes/canary-ingressroute.yaml
+          fi
 
       - name: Verify Canary
+        shell: bash
         run: |
-          kubectl rollout status deployment/ecommerce-api-canary \
-            -n ecommerce-dev \
-            --timeout=180s
+          if [[ "${{ needs.detect-changes.outputs.application_changed }}" == "true" ||
+                "${{ needs.detect-changes.outputs.canary_deployment_changed }}" == "true" ]]; then
 
-          kubectl get deployment,pod,service \
-            -n ecommerce-dev \
-            -l 'deployment-track=canary' \
-            -o wide
+            kubectl rollout status deployment/ecommerce-api-canary \
+              -n ecommerce-dev \
+              --timeout=180s
+
+            kubectl get deployment,pod,service \
+              -n ecommerce-dev \
+              -l 'deployment-track=canary' \
+              -o wide
+          fi
+
+          if [[ "${{ needs.detect-changes.outputs.canary_traffic_changed }}" == "true" ]]; then
+            echo "Current Canary traffic configuration:"
+            kubectl get traefikservice ecommerce-api-canary-traffic \
+              -n ecommerce-dev \
+              -o yaml
+
+            echo "Current Canary IngressRoute:"
+            kubectl get ingressroute ecommerce-api-canary \
+              -n ecommerce-dev \
+              -o yaml
+          fi
