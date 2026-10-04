@@ -138,7 +138,7 @@ jobs:
       - terraform-validation
       - docker-build
 
-    if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/phase14-canary')
 
     steps:
       - name: Checkout repository
@@ -214,4 +214,44 @@ jobs:
           kubectl get deployment,pod \
             -n ecommerce-dev \
             -l 'deployment-color in (blue,green)' \
+            -o wide
+  deploy-canary:
+    name: Deploy Canary to K3s
+    runs-on: [self-hosted, k3s-deploy]
+
+    needs:
+      - ecr-push
+
+    if: github.event_name == 'push' && github.ref == 'refs/heads/phase14-canary'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Prepare Canary deployment manifest
+        env:
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          sed \
+            "s|099731416734.dkr.ecr.ap-south-2.amazonaws.com/ecommerce-devops-platform:IMAGE_TAG|099731416734.dkr.ecr.ap-south-2.amazonaws.com/ecommerce-devops-platform:${IMAGE_TAG}|g" \
+            kubernetes/canary.yaml \
+            > /tmp/canary-deploy.yaml
+
+          echo "Canary deployment image:"
+          grep "image:" /tmp/canary-deploy.yaml
+
+      - name: Deploy Canary
+        run: |
+          kubectl apply -f /tmp/canary-deploy.yaml
+          kubectl apply -f kubernetes/canary-service.yaml
+
+      - name: Verify Canary
+        run: |
+          kubectl rollout status deployment/ecommerce-api-canary \
+            -n ecommerce-dev \
+            --timeout=180s
+
+          kubectl get deployment,pod,service \
+            -n ecommerce-dev \
+            -l 'deployment-track=canary' \
             -o wide

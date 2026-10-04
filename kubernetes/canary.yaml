@@ -1,0 +1,62 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ecommerce-api-canary
+  namespace: ecommerce-dev
+  labels:
+    app: ecommerce-api-canary
+    deployment-track: canary
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ecommerce-api-canary
+  template:
+    metadata:
+      labels:
+        app: ecommerce-api-canary
+        deployment-track: canary
+    spec:
+      serviceAccountName: ecommerce-api-sa
+      imagePullSecrets:
+        - name: ecr-pull-secret
+      containers:
+        - name: ecommerce-api
+          image: 099731416734.dkr.ecr.ap-south-2.amazonaws.com/ecommerce-devops-platform:IMAGE_TAG
+          imagePullPolicy: Always
+
+          envFrom:
+            - configMapRef:
+                name: ecommerce-api-config
+
+          env:
+            - name: DEPLOYMENT_COLOR
+              value: "CANARY"
+
+          ports:
+            - name: http
+              containerPort: 5000
+
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 20
+            timeoutSeconds: 3
+
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            initialDelaySeconds: 12
+            periodSeconds: 10
+            timeoutSeconds: 3
+
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
