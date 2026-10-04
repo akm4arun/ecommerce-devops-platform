@@ -1,0 +1,17 @@
+apiVersion: traefik.io/v1alpha1
+kind: TraefikService
+metadata:
+  name: ecommerce-api-canary-traffic
+  namespace: ecommerce-dev
+spec:
+  weighted:
+    services:
+      - name: ecommerce-api
+        kind: Service
+        port: http
+        weight: 100
+
+      - name: ecommerce-api-canary
+        kind: Service
+        port: http
+        weight: 0
