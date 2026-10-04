@@ -14,6 +14,58 @@ permissions:
   contents: read
 
 jobs:
+  detect-changes:
+    name: Detect Changed Components
+    runs-on: ubuntu-latest
+
+    outputs:
+      application_changed: ${{ steps.changes.outputs.application_changed }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect application changes
+        id: changes
+        shell: bash
+        run: |
+          APPLICATION_CHANGED=false
+
+          if [[ "${{ github.event_name }}" == "push" ]]; then
+            CHANGED_FILES="$(git diff --name-only \
+              "${{ github.event.before }}" \
+              "${{ github.sha }}")"
+          elif [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            CHANGED_FILES="$(git diff --name-only \
+              "${{ github.event.pull_request.base.sha }}" \
+              "${{ github.event.pull_request.head.sha }}")"
+          else
+            echo "Manual workflow dispatch: treating as application change."
+            APPLICATION_CHANGED=true
+            CHANGED_FILES=""
+          fi
+
+          echo "Changed files:"
+          if [[ -n "$CHANGED_FILES" ]]; then
+            echo "$CHANGED_FILES"
+          else
+            echo "(none)"
+          fi
+
+          while IFS= read -r file; do
+            [[ -z "$file" ]] && continue
+
+            case "$file" in
+              Dockerfile|requirements.txt|app/*)
+                APPLICATION_CHANGED=true
+                ;;
+            esac
+          done <<< "$CHANGED_FILES"
+
+          echo "Application changed: $APPLICATION_CHANGED"
+          echo "application_changed=$APPLICATION_CHANGED" >> "$GITHUB_OUTPUT"
   python-tests:
     name: Python Tests
     runs-on: ubuntu-latest
@@ -138,8 +190,12 @@ jobs:
       - security-scan
       - terraform-validation
       - docker-build
+      - detect-changes
 
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/phase14-canary')
+    if: >
+      github.event_name == 'push' &&
+      (github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/phase14-canary') &&
+      needs.detect-changes.outputs.application_changed == 'true'
 
     steps:
       - name: Checkout repository
