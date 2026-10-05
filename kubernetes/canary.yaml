@@ -18,12 +18,26 @@ spec:
         deployment-track: canary
     spec:
       serviceAccountName: ecommerce-api-sa
+
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+
       imagePullSecrets:
         - name: ecr-pull-secret
+
       containers:
         - name: ecommerce-api
           image: 099731416734.dkr.ecr.ap-south-2.amazonaws.com/ecommerce-devops-platform:IMAGE_TAG
           imagePullPolicy: Always
+
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
 
           envFrom:
             - configMapRef:

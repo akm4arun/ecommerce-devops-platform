@@ -14,6 +14,12 @@ COPY pyproject.toml .
 
 RUN pip install --no-cache-dir -e .
 
+# Create a dedicated non-root application user
+RUN useradd --create-home --shell /usr/sbin/nologin appuser \
+    && chown -R appuser:appuser /app
+
+USER appuser
+
 EXPOSE 5000
 
 CMD ["python", "-m", "app.main"]
