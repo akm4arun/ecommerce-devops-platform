@@ -1,0 +1,114 @@
+name: Environment Rollback
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Environment to rollback"
+        required: true
+        type: choice
+        options:
+          - canary
+        default: canary
+
+permissions:
+  contents: read
+
+jobs:
+  rollback:
+    name: Rollback ${{ inputs.environment }}
+    runs-on: [self-hosted, k3s-deploy]
+
+    steps:
+      - name: Resolve rollback target
+        id: target
+        shell: bash
+        run: |
+          case "${{ inputs.environment }}" in
+            canary)
+              echo "ref=canary" >> "$GITHUB_OUTPUT"
+              echo "namespace=ecommerce-dev" >> "$GITHUB_OUTPUT"
+              echo "rollback_manifest=kubernetes/canary-rollback.yaml" >> "$GITHUB_OUTPUT"
+              echo "traffic_resource=ecommerce-api-canary-traffic" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "ERROR: Unsupported rollback environment: ${{ inputs.environment }}"
+              exit 1
+              ;;
+          esac
+
+          echo "Environment: ${{ inputs.environment }}"
+
+      - name: Checkout environment configuration
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.target.outputs.ref }}
+
+      - name: Verify rollback target
+        shell: bash
+        run: |
+          echo "Rollback environment: ${{ inputs.environment }}"
+          echo "Kubernetes namespace: ${{ steps.target.outputs.namespace }}"
+          echo "Rollback manifest: ${{ steps.target.outputs.rollback_manifest }}"
+
+          if [[ ! -f "${{ steps.target.outputs.rollback_manifest }}" ]]; then
+            echo "ERROR: Rollback manifest not found."
+            exit 1
+          fi
+
+          echo "Rollback manifest found."
+
+      - name: Verify current traffic
+        shell: bash
+        run: |
+          echo "Current traffic configuration:"
+
+          kubectl get traefikservice \
+            "${{ steps.target.outputs.traffic_resource }}" \
+            -n "${{ steps.target.outputs.namespace }}" \
+            -o yaml
+
+      - name: Apply rollback
+        shell: bash
+        run: |
+          kubectl apply \
+            -f "${{ steps.target.outputs.rollback_manifest }}"
+
+      - name: Verify rollback traffic
+        shell: bash
+        run: |
+          STABLE_WEIGHT="$(kubectl get traefikservice \
+            "${{ steps.target.outputs.traffic_resource }}" \
+            -n "${{ steps.target.outputs.namespace }}" \
+            -o jsonpath='{.spec.weighted.services[?(@.name=="ecommerce-api")].weight}')"
+
+          CANARY_WEIGHT="$(kubectl get traefikservice \
+            "${{ steps.target.outputs.traffic_resource }}" \
+            -n "${{ steps.target.outputs.namespace }}" \
+            -o jsonpath='{.spec.weighted.services[?(@.name=="ecommerce-api-canary")].weight}')"
+
+          echo "Stable weight: ${STABLE_WEIGHT}"
+          echo "Canary weight: ${CANARY_WEIGHT}"
+
+          if [[ "$STABLE_WEIGHT" != "100" || "$CANARY_WEIGHT" != "0" ]]; then
+            echo "ERROR: Rollback verification failed."
+            exit 1
+          fi
+
+          echo "Rollback verified successfully."
+          echo "Stable: 100%"
+          echo "Canary: 0%"
+
+      - name: Verify stable application health
+        shell: bash
+        run: |
+          kubectl run rollback-health-check \
+            -n "${{ steps.target.outputs.namespace }}" \
+            --rm -i \
+            --restart=Never \
+            --image=curlimages/curl \
+            -- \
+            curl -fsS http://ecommerce-api/health
+
+          echo
+          echo "Stable application health check passed."
