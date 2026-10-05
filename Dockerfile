@@ -18,7 +18,7 @@ RUN pip install --no-cache-dir -e .
 RUN useradd --create-home --shell /usr/sbin/nologin appuser \
     && chown -R appuser:appuser /app
 
-USER appuser
+USER 1000:1000
 
 EXPOSE 5000
 
