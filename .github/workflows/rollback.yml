@@ -1,0 +1,85 @@
+name: Environment Rollback
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Environment to rollback"
+        required: true
+        type: choice
+        options:
+          - canary
+        default: canary
+
+permissions:
+  contents: read
+
+jobs:
+  rollback:
+    name: Rollback ${{ inputs.environment }}
+    runs-on: [self-hosted, k3s-deploy]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Validate environment
+        shell: bash
+        run: |
+          if [[ "${{ inputs.environment }}" != "canary" ]]; then
+            echo "ERROR: Unsupported environment: ${{ inputs.environment }}"
+            exit 1
+          fi
+
+          echo "Rollback target: ${{ inputs.environment }}"
+
+      - name: Verify current traffic
+        shell: bash
+        run: |
+          echo "Current traffic configuration:"
+
+          kubectl get traefikservice ecommerce-api-canary-traffic \
+            -n ecommerce-dev \
+            -o yaml
+
+      - name: Apply Canary rollback
+        shell: bash
+        run: |
+          kubectl apply -f kubernetes/canary-rollback.yaml
+
+      - name: Verify rollback traffic
+        shell: bash
+        run: |
+          STABLE_WEIGHT="$(kubectl get traefikservice ecommerce-api-canary-traffic \
+            -n ecommerce-dev \
+            -o jsonpath='{.spec.weighted.services[?(@.name=="ecommerce-api")].weight}')"
+
+          CANARY_WEIGHT="$(kubectl get traefikservice ecommerce-api-canary-traffic \
+            -n ecommerce-dev \
+            -o jsonpath='{.spec.weighted.services[?(@.name=="ecommerce-api-canary")].weight}')"
+
+          echo "Stable weight: ${STABLE_WEIGHT}"
+          echo "Canary weight: ${CANARY_WEIGHT}"
+
+          if [[ "$STABLE_WEIGHT" != "100" || "$CANARY_WEIGHT" != "0" ]]; then
+            echo "ERROR: Rollback verification failed."
+            exit 1
+          fi
+
+          echo "Rollback verified successfully."
+          echo "Stable: 100%"
+          echo "Canary: 0%"
+
+      - name: Verify stable application health
+        shell: bash
+        run: |
+          kubectl run rollback-health-check \
+            -n ecommerce-dev \
+            --rm -i \
+            --restart=Never \
+            --image=curlimages/curl \
+            -- \
+            curl -fsS http://ecommerce-api/health
+
+          echo
+          echo "Stable application health check passed."
