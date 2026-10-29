@@ -19,6 +19,13 @@ spec:
     spec:
       serviceAccountName: ecommerce-api-sa
 
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+
       imagePullSecrets:
         - name: ecr-pull-secret
 
@@ -26,6 +33,13 @@ spec:
         - name: ecommerce-api
           image: 099731416734.dkr.ecr.ap-south-2.amazonaws.com/ecommerce-devops-platform:IMAGE_TAG
           imagePullPolicy: Always
+
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
 
           envFrom:
             - configMapRef:
@@ -85,6 +99,13 @@ spec:
     spec:
       serviceAccountName: ecommerce-api-sa
 
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+
       imagePullSecrets:
         - name: ecr-pull-secret
 
@@ -92,6 +113,13 @@ spec:
         - name: ecommerce-api
           image: 099731416734.dkr.ecr.ap-south-2.amazonaws.com/ecommerce-devops-platform:IMAGE_TAG
           imagePullPolicy: Always
+
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
 
           envFrom:
             - configMapRef:
